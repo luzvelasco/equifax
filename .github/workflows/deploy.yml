@@ -1,0 +1,86 @@
+name: CI/CD Pipeline de Seguridad
+
+on:
+  push:
+    branches: [ main ] # Se activa al subir código a la rama 'main'
+
+jobs:
+  # ------------------------------------
+  # TRABAJO 1: CONSTRUIR Y ESCANEAR 
+  # ------------------------------------
+  build-and-scan:
+    name: Build, Scan & Push Image
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout del código
+      uses: actions/checkout@v3
+
+    # PREVENCIÓN DE VERSIONES VULNERABLES
+    - name: Escanear dependencias con Trivy
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'             # Escanea el sistema de archivos (requirements.txt)
+        ignore-unfixed: true        # Ignora vulnerabilidades que aún no tienen parche
+        format: 'table'
+        exit-code: '1'              # Si encuentra algo CRÍTICO o ALTO, falla el pipeline
+        severity: 'CRITICAL,HIGH'   # Solo falla en estas severidades
+
+    - name: Configurar credenciales de AWS
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Login a Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Construir y 'taggear' la imagen de Docker
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+        IMAGE_TAG: ${{ github.sha }} # Usa el ID del commit como 'tag'
+      run: |
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  # ------------------------------------
+  # TRABAJO 2: DESPLEGAR (Si el escaneo pasó)
+  # ------------------------------------
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-and-scan # Depende del trabajo anterior. Si falló, este no corre.
+
+    steps:
+    - name: Configurar credenciales de AWS
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Descargar la Task Definition existente
+      run: |
+        aws ecs describe-task-definition --task-definition ${{ secrets.ECS_TASK_DEFINITION }} \
+        --query taskDefinition > task-definition.json
+
+    - name: Actualizar la Task Definition con la nueva imagen
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: ${{ secrets.CONTAINER_NAME }}
+        image: ${{ needs.build-and-scan.outputs.image }} # Imagen del 'job' anterior
+
+    - name: Desplegar la nueva Task Definition en el servicio de ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
+        service: ${{ secrets.ECS_SERVICE }}
+        cluster: ${{ secrets.ECS_CLUSTER }}
+        wait-for-service-stability: true # Espera a que el despliegue termine
