@@ -1,0 +1,1 @@
+flask==2.2.0  # Una versión específica (luego la cambiaremos por una vulnerable)
