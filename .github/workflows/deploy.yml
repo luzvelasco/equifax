@@ -98,11 +98,20 @@ jobs:
         aws ecs describe-task-definition --task-definition ${{ secrets.ECS_TASK_DEFINITION }} \
         --query taskDefinition > task-definition.json
 
+    - name: Limpiar la Task Definition JSON
+      run: |
+        # Instalar jq (si no está disponible)
+        sudo apt-get update && sudo apt-get install -y jq
+
+        # Eliminar la clave ofensiva del JSON antes de renderizar
+        jq 'del(.enableFaultInjection)' task-definition.json > task-definition_cleaned.json
+        mv task-definition_cleaned.json task-definition.json
+
     - name: Actualizar la Task Definition con la nueva imagen
       id: task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: task-definition.json
+        task-definition: task-definition.json 
         container-name: ${{ secrets.CONTAINER_NAME }}
         image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ steps.get-image-tag.outputs.image_name_tag }}
 
