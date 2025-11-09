@@ -46,11 +46,11 @@ jobs:
       run: |
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
         docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-        IMAGE_URI_FULL="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-        echo "IMAGE_URI=$IMAGE_URI_FULL" >> $GITHUB_ENV
+        IMAGE_NAME_WITH_TAG="${{ secrets.ECR_REPOSITORY }}:${{ github.sha }}"
+        echo "image_name_tag=$IMAGE_NAME_WITH_TAG" >> $GITHUB_OUTPUT
     
-    #outputs:
-    #  image: ${{ steps.build-image.outputs.image }}
+    outputs:
+      image_name_tag: ${{ steps.build-image.outputs.image_name_tag }}
 
   # ------------------------------------
   # TRABAJO 2: DESPLEGAR (Si el escaneo pasó)
@@ -69,6 +69,12 @@ jobs:
         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Obtener ID de Cuenta
+      id: account-id
+      run: |
+        AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+        echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID" >> $GITHUB_ENV
 
     - name: Descargar la Task Definition existente
       run: |
