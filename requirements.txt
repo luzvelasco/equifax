@@ -1,1 +1,2 @@
 Flask==3.0.3  # versión segura
+Jinja2==2.10.1
